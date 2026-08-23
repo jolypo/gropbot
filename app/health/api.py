@@ -4,13 +4,30 @@ from datetime import datetime, timezone
 from fastapi import FastAPI
 
 from app.config import settings
-from app.telegram.bots import start_all_bots
+from app.telegram.bots import (
+    start_all_bots,
+    stop_all_bots,
+)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await start_all_bots()
-    yield
+
+    applications = None
+
+    try:
+
+        applications = await start_all_bots()
+
+        app.state.telegram_applications = applications
+
+        yield
+
+    finally:
+
+        await stop_all_bots(
+            applications
+        )
 
 
 app = FastAPI(
@@ -21,17 +38,29 @@ app = FastAPI(
 
 @app.get("/health")
 async def health():
+
     return {
         "status": "alive",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+
+        "timestamp": datetime.now(
+            timezone.utc
+        ).isoformat(),
+
         "database": (
             "configured"
             if settings.database_url
             else "missing"
         ),
+
         "data_provider": (
             "configured"
             if settings.sahmk_api_key
             else "not_configured"
+        ),
+
+        "signal_bot": (
+            "configured"
+            if settings.signal_bot_token
+            else "missing"
         ),
     }
