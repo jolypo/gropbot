@@ -19,8 +19,6 @@ async def lifespan(app: FastAPI):
 
         applications = await start_all_bots()
 
-        app.state.telegram_applications = applications
-
         yield
 
     finally:
@@ -42,25 +40,16 @@ async def health():
     return {
         "status": "alive",
 
-        "timestamp": datetime.now(
-            timezone.utc
-        ).isoformat(),
+        "timestamp":
+            datetime.now(timezone.utc).isoformat(),
 
-        "database": (
+        "database":
             "configured"
             if settings.database_url
-            else "missing"
-        ),
+            else "missing",
 
-        "data_provider": (
+        "data_provider":
             "configured"
             if settings.sahmk_api_key
-            else "not_configured"
-        ),
-
-        "signal_bot": (
-            "configured"
-            if settings.signal_bot_token
-            else "missing"
-        ),
+            else "not_configured",
     }
