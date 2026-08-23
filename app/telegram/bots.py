@@ -1,4 +1,3 @@
-import asyncio
 import logging
 
 from telegram import Update, Bot
@@ -17,6 +16,7 @@ from app.data.validation import validate_quote
 from app.indicators.technical import add_indicators
 from app.strategy.scoring import score_row
 from app.risk.engine import build_levels
+
 
 logger = logging.getLogger("telegram_bots")
 
@@ -89,13 +89,30 @@ async def send_startup_message(
 
 
 # =========================================================
+# SAFE MISSING CHECK
+# =========================================================
+
+def pd_is_missing(value):
+
+    if value is None:
+        return True
+
+    try:
+        return bool(value != value)
+    except Exception:
+        return False
+
+
+# =========================================================
 # SIGNAL SCANNER
 # =========================================================
 
 async def scan_best_signal():
 
     if not settings.sahmk_api_key:
-        raise RuntimeError("SAHMK_API_KEY غير موجود")
+        raise RuntimeError(
+            "SAHMK_API_KEY غير موجود في Environment Variables"
+        )
 
     symbols = [
         s.strip()
@@ -105,7 +122,7 @@ async def scan_best_signal():
 
     if not symbols:
         raise RuntimeError(
-            "TASI_SYMBOLS فارغ. أضف الأسهم في ملف .env"
+            "TASI_SYMBOLS فارغ. أضف الأسهم في Environment Variables"
         )
 
     provider = SahmkDataProvider(
@@ -123,9 +140,9 @@ async def scan_best_signal():
 
         try:
 
-            # ---------------------------------------------
+            # -------------------------------------------------
             # Quote
-            # ---------------------------------------------
+            # -------------------------------------------------
 
             quote = await provider.quote(symbol)
 
@@ -142,9 +159,9 @@ async def scan_best_signal():
                 )
                 continue
 
-            # ---------------------------------------------
-            # Historical data
-            # ---------------------------------------------
+            # -------------------------------------------------
+            # Historical
+            # -------------------------------------------------
 
             df = await provider.historical(
                 symbol,
@@ -158,9 +175,9 @@ async def scan_best_signal():
                 )
                 continue
 
-            # ---------------------------------------------
+            # -------------------------------------------------
             # Indicators
-            # ---------------------------------------------
+            # -------------------------------------------------
 
             df = add_indicators(df)
 
@@ -182,25 +199,32 @@ async def scan_best_signal():
                 pd_is_missing(row.get(x))
                 for x in required
             ):
+                logger.warning(
+                    "%s rejected: missing indicators",
+                    symbol,
+                )
                 continue
 
-            # ---------------------------------------------
+            # -------------------------------------------------
             # Score
-            # ---------------------------------------------
+            # -------------------------------------------------
 
             result = score_row(row)
 
             if result.total < settings.min_score:
+
                 logger.info(
-                    "%s rejected: score %.1f",
+                    "%s rejected: score %.1f < %.1f",
                     symbol,
                     result.total,
+                    settings.min_score,
                 )
+
                 continue
 
-            # ---------------------------------------------
+            # -------------------------------------------------
             # Trade levels
-            # ---------------------------------------------
+            # -------------------------------------------------
 
             levels = build_levels(
                 float(quote.price),
@@ -218,6 +242,12 @@ async def scan_best_signal():
                     "levels": levels,
                     "delay": quote.delay_seconds,
                 }
+            )
+
+            logger.info(
+                "✅ Candidate: %s score=%.1f",
+                symbol,
+                result.total,
             )
 
         except Exception as exc:
@@ -239,22 +269,19 @@ async def scan_best_signal():
         reverse=True,
     )
 
-    return candidates[0]
+    best = candidates[0]
 
+    logger.info(
+        "🏆 BEST SIGNAL: %s score=%.1f",
+        best["symbol"],
+        best["score"],
+    )
 
-def pd_is_missing(value):
-
-    if value is None:
-        return True
-
-    try:
-        return bool(value != value)
-    except Exception:
-        return False
+    return best
 
 
 # =========================================================
-# TELEGRAM SIGNAL MESSAGE
+# FORMAT SIGNAL
 # =========================================================
 
 def format_signal(signal):
@@ -270,9 +297,9 @@ def format_signal(signal):
         "🚨 <b>فرصة تداول جديدة</b>\n\n"
 
         f"📌 <b>{signal['symbol']}</b>"
-        f" — {signal['name']}\n"
+        f" — {signal['name']}\n\n"
 
-        f"📈 الاتجاه: <b>شراء</b>\n\n"
+        "📈 الاتجاه: <b>شراء</b>\n\n"
 
         f"💰 منطقة الدخول: "
         f"<b>{levels.entry_low:.2f} – "
@@ -286,6 +313,7 @@ def format_signal(signal):
         f"🎯 TP3: <b>{levels.tp3:.2f}</b>\n\n"
 
         f"📊 Score: <b>{signal['score']:.0f}/100</b>\n"
+
         f"⚖️ Risk/Reward: "
         f"<b>1 : {levels.rr:.2f}</b>\n\n"
 
@@ -300,27 +328,23 @@ def format_signal(signal):
 
 
 # =========================================================
-# /signal COMMAND
+# RUN SIGNAL
 # =========================================================
 
-async def signal_command(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-):
+async def run_signal(update: Update):
 
-    if not update.effective_chat:
+    if not update.effective_message:
         return
 
-    chat_id = update.effective_chat.id
-
-    logger.info(
-        "📥 /signal received from chat %s",
-        chat_id,
-    )
-
     message = await update.effective_message.reply_text(
-        "🔎 جاري فحص السوق السعودي...\n"
-        "⏳ لحظة، أبحث عن أفضل فرصة."
+        "🔎 <b>جاري فحص السوق السعودي...</b>\n\n"
+        "📊 أفحص الأسهم\n"
+        "📈 الاتجاه والزخم\n"
+        "📊 حجم التداول\n"
+        "🚀 الاختراق\n"
+        "⚖️ المخاطرة والعائد\n\n"
+        "⏳ انتظر النتيجة...",
+        parse_mode="HTML",
     )
 
     try:
@@ -330,12 +354,13 @@ async def signal_command(
         if signal is None:
 
             await message.edit_text(
-                "❌ لم أجد حاليًا سهمًا يحقق شروط النظام.\n\n"
-                f"الحد الأدنى للـScore: "
+                "❌ <b>لم أجد حاليًا فرصة تحقق شروط النظام.</b>\n\n"
+                f"📊 الحد الأدنى Score: "
                 f"{settings.min_score}/100\n"
-                f"الحد الأدنى R:R: "
+                f"⚖️ الحد الأدنى R:R: "
                 f"1:{settings.min_rr}\n\n"
-                "سأنتظر فرصة أقوى بدل إعطاء إشارة ضعيفة."
+                "لن أرسل صفقة ضعيفة.",
+                parse_mode="HTML",
             )
 
             return
@@ -354,19 +379,38 @@ async def signal_command(
     except Exception as exc:
 
         logger.exception(
-            "❌ SIGNAL COMMAND ERROR: %s",
+            "❌ SIGNAL ERROR: %s",
             exc,
         )
 
         await message.edit_text(
-            "❌ حدث خطأ أثناء فحص السوق.\n\n"
-            f"<code>{str(exc)[:500]}</code>",
+            "❌ <b>حدث خطأ أثناء فحص السوق.</b>\n\n"
+            f"<code>{str(exc)[:700]}</code>",
             parse_mode="HTML",
         )
 
 
 # =========================================================
-# Arabic command: سقنل
+# /signal
+# =========================================================
+
+async def signal_command(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+
+    logger.info(
+        "📥 /signal received from chat=%s",
+        update.effective_chat.id
+        if update.effective_chat
+        else "unknown",
+    )
+
+    await run_signal(update)
+
+
+# =========================================================
+# كلمة سقنل
 # =========================================================
 
 async def arabic_signal(
@@ -374,7 +418,14 @@ async def arabic_signal(
     context: ContextTypes.DEFAULT_TYPE,
 ):
 
-    await signal_command(update, context)
+    logger.info(
+        "📥 Arabic signal received from chat=%s",
+        update.effective_chat.id
+        if update.effective_chat
+        else "unknown",
+    )
+
+    await run_signal(update)
 
 
 # =========================================================
@@ -398,7 +449,10 @@ async def start_signal_bot():
         .build()
     )
 
+    # -----------------------------------------------------
     # /signal
+    # -----------------------------------------------------
+
     application.add_handler(
         CommandHandler(
             "signal",
@@ -406,19 +460,18 @@ async def start_signal_bot():
         )
     )
 
-    # /سقنل إذا تيليجرام قبل الأمر
-    application.add_handler(
-        CommandHandler(
-            "سقنل",
-            arabic_signal,
-        )
-    )
+    # -----------------------------------------------------
+    # كلمة سقنل بدون /
+    #
+    # مهم:
+    # لا تستخدم CommandHandler هنا
+    # -----------------------------------------------------
 
-    # كلمة "سقنل" بدون /
     application.add_handler(
         MessageHandler(
             filters.TEXT
-            & filters.Regex(r"(?i)^\s*سقنل\s*$"),
+            & ~filters.COMMAND
+            & filters.Regex(r"^\s*سقنل\s*$"),
             arabic_signal,
         )
     )
@@ -455,7 +508,6 @@ async def stop_signal_bot(application):
     try:
 
         if application.updater:
-
             await application.updater.stop()
 
         await application.stop()
@@ -490,14 +542,12 @@ async def start_all_bots():
         "========================================"
     )
 
-    # Startup messages
     await send_startup_message(
         "SIGNAL BOT",
         settings.signal_bot_token,
         settings.telegram_chat_id,
     )
 
-    # Actual Telegram listener
     signal_application = await start_signal_bot()
 
     return {
