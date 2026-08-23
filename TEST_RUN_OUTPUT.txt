@@ -1,0 +1,3 @@
+
+Build verification: compileall=0
+Dependency install: unavailable in sandbox (network/DNS blocked), so pytest was not executed.

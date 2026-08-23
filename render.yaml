@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: saudi-tasi-signal-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: SAHMK_API_KEY
+        sync: false
+      - key: SIGNAL_BOT_TOKEN
+        sync: false

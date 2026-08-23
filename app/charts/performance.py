@@ -1,0 +1,5 @@
+from pathlib import Path
+import matplotlib.pyplot as plt
+def trade_card(path,symbol,strategy,entry,exit_price,pnl_pct,score,rr,delay_seconds):
+ p=Path(path);p.parent.mkdir(parents=True,exist_ok=True);fig=plt.figure(figsize=(10,6));ax=fig.add_axes([0,0,1,1]);ax.axis('off');win=pnl_pct>=0
+ ax.text(.5,.9,'TASI PAPER TRADING',ha='center',fontsize=22,weight='bold');ax.text(.5,.78,'TRADE RESULT',ha='center',fontsize=18);ax.text(.08,.64,f'Symbol: {symbol}',fontsize=13);ax.text(.08,.57,f'Strategy: {strategy}',fontsize=13);ax.text(.08,.5,f'Entry: {entry:.2f}',fontsize=13);ax.text(.08,.43,f'Exit: {exit_price:.2f}',fontsize=13);ax.text(.5,.54,f'{pnl_pct:+.2f}%',ha='center',fontsize=28,weight='bold');ax.text(.5,.43,'WINNING TRADE' if win else 'LOSING TRADE',ha='center',fontsize=16,weight='bold');ax.text(.08,.3,f'Score: {score:.0f}/100',fontsize=12);ax.text(.08,.24,f'R:R: {rr:.2f}',fontsize=12);ax.text(.08,.18,f'Data Delay: ~{delay_seconds/60:.0f} min',fontsize=12);ax.text(.5,.07,'PAPER TRADING ONLY',ha='center',fontsize=12);fig.savefig(p,dpi=150,bbox_inches='tight');plt.close(fig);return p
